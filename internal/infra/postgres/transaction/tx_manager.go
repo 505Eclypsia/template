@@ -1,4 +1,4 @@
-package db
+package transaction
 
 import (
 	"context"
@@ -25,9 +25,13 @@ func NewTxManager(pool *pgxpool.Pool) TxManager {
 func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
 	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("pool start: %v", err)
+		return fmt.Errorf("pool start: %w", err)
 	}
-	defer tx.Rollback(ctx)
+
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
 	txCtx := context.WithValue(ctx, txKey{}, tx)
 
 	err = fn(txCtx)
@@ -40,4 +44,9 @@ func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) 
 	}
 
 	return nil
+}
+
+func FromContext(ctx context.Context) (pgx.Tx, bool) {
+	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
+	return tx, ok
 }

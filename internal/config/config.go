@@ -69,7 +69,7 @@ func (r *envReader) int32(target string) int32 {
 		return 0
 	}
 
-	num, err := strconv.Atoi(str)
+	num, err := strconv.ParseInt(str, 10, 32)
 	if err != nil {
 		r.errs = append(r.errs, fmt.Errorf("invalid %s: %w", target, err))
 		return 0
