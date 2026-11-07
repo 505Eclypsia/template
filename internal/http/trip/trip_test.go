@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/505Eclypsia/template/internal/domain/trip"
 )
@@ -37,13 +39,17 @@ func TestTrip_Finish(t *testing.T) {
 			}
 
 			err := tr.Finish(now)
-			if err != tt.expectedErr {
-				t.Errorf("expected %v, got %v", tt.expectedErr, err)
+
+			if tt.expectedErr != nil {
+				require.ErrorIs(t, err, tt.expectedErr)
+				assert.Equal(t, tt.initial, tr.Status, "статус не должен меняться при ошибке")
+				return
 			}
 
-			if tt.expectedErr == nil && tr.Status != trip.StatusCompleted {
-				t.Errorf("status must be completed")
-			}
+			require.NoError(t, err)
+			assert.Equal(t, trip.StatusCompleted, tr.Status)
+			require.NotNil(t, tr.FinishedAt)
+			assert.True(t, now.Equal(*tr.FinishedAt))
 		})
 	}
 }

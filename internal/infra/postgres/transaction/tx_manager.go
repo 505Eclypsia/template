@@ -23,6 +23,10 @@ func NewTxManager(pool *pgxpool.Pool) TxManager {
 }
 
 func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	if _, ok := FromContext(ctx); ok {
+		return fn(ctx)
+	}
+
 	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("pool start: %w", err)

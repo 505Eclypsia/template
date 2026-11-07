@@ -43,14 +43,14 @@ func (t *TripRepo) Create(ctx context.Context, trip model.Trip) error {
 	return nil
 }
 
-func (t *TripRepo) Finish(ctx context.Context, id uuid.UUID) error {
+func (t *TripRepo) Finish(ctx context.Context, id uuid.UUID, finishedAt time.Time) error {
 	query, args, err := psql.Update("trips").
 		Set("status", "completed").
-		Set("finished_at", time.Now()).
+		Set("finished_at", finishedAt).
 		Where(sq.Eq{"id": id, "status": "active"}).
 		ToSql()
 	if err != nil {
-		return fmt.Errorf("query making: %w", err)
+		return fmt.Errorf("build finish query: %w", err)
 	}
 
 	tag, err := t.exec(ctx, query, args...)
@@ -66,11 +66,9 @@ func (t *TripRepo) Finish(ctx context.Context, id uuid.UUID) error {
 
 		var status string
 		err = t.queryRow(ctx, query, args...).Scan(&status)
-
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrTripNotFound
 		}
-
 		if err != nil {
 			return fmt.Errorf("check trip status: %w", err)
 		}
@@ -100,8 +98,9 @@ func (t *TripRepo) AddTripStatusHistory(ctx context.Context, tSH model.TripStatu
 
 func (t *TripRepo) AddTripIdempotencyKey(ctx context.Context, tIK model.TripIdempotencyKey) error {
 	query, args, err := psql.Insert("trip_idempotency_keys").
-		Columns("id", "request_hash", "trip_id").
-		Values(tIK.ID, tIK.RequestHash, tIK.TripID).
+		Columns("id", "request_hash", "trip_id", "created_at").
+		Values(tIK.ID, tIK.RequestHash, tIK.TripID, sq.Expr("now()")).
+		Suffix("ON CONFLICT (id) DO UPDATE SET request_hash = EXCLUDED.request_hash, trip_id = EXCLUDED.trip_id, created_at = EXCLUDED.created_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("query making: %w", err)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	domain "github.com/505Eclypsia/template/internal/domain/trip"
@@ -89,6 +90,22 @@ func WriteProblem(w http.ResponseWriter, r *http.Request, err error) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(prob)
+}
+
+func WriteAndLog(w http.ResponseWriter, r *http.Request, logger *slog.Logger, op string, err error) {
+	status, _ := Problem(err)
+
+	level := slog.LevelDebug
+	if status >= http.StatusInternalServerError {
+		level = slog.LevelError
+	}
+	logger.Log(r.Context(), level, op+" failed",
+		slog.Int("status", status),
+		slog.String("path", r.URL.Path),
+		slog.Any("error", err),
+	)
+
+	WriteProblem(w, r, err)
 }
 
 func newProblem(status int, code, title, detail string) api.Problem {

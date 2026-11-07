@@ -19,15 +19,18 @@ func (t *TripRepo) GetIdempotencyKeyByID(ctx context.Context, id uuid.UUID) (*mo
 	).
 		From("trip_idempotency_keys").
 		Where(sq.Eq{"id": id}).
+		Where("created_at >= now() - interval '24 hours'").
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("query making: %v", err)
+		return nil, fmt.Errorf("query making: %w", err)
 	}
 
 	tIK, err := scanIdempotencyKey(t.queryRow(ctx, query, args...))
-
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("database querying: %w", err)
 	}
 
 	return tIK, nil

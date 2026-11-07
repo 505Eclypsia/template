@@ -32,7 +32,7 @@ func TestRepository_TransactionRollback(t *testing.T) {
 	}
 	defer pool.Close()
 
-	repo := repoTrip.NewTripRepo(pool)
+	repo := repoTrip.NewTripRepo(pool, 3*time.Second)
 	txManager := transaction.NewTxManager(pool)
 
 	tripID := uuid.New()
@@ -49,15 +49,23 @@ func TestRepository_TransactionRollback(t *testing.T) {
 		StartedAt:      time.Now(),
 	}
 
-	_ = txManager.Do(ctx, func(txCtx context.Context) error {
+	errSimulated := errors.New("simulated error to trigger rollback")
+
+	doErr := txManager.Do(ctx, func(txCtx context.Context) error {
 		if err := repo.Create(txCtx, testTrip); err != nil {
 			return err
 		}
-		return errors.New("simulated error to trigger rollback")
+		return errSimulated
 	})
+	if !errors.Is(doErr, errSimulated) {
+		t.Fatalf("transaction failed before rollback check (БД запущена? миграции применены?): %v", doErr)
+	}
 
 	_, err = repo.GetTripByID(ctx, tripID)
+	if err == nil {
+		t.Fatalf("expected trip to be rolled back, but it was found")
+	}
 	if !errors.Is(err, trip.ErrTripNotFound) {
-		t.Fatalf("expected trip to be rolled back, but found it!")
+		t.Fatalf("unexpected error while checking rollback: %v", err)
 	}
 }

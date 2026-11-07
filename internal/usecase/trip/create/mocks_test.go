@@ -114,6 +114,20 @@ func (mr *MocktripRepositoryMockRecorder) GetTripByID(ctx, id any) *gomock.Call 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTripByID", reflect.TypeOf((*MocktripRepository)(nil).GetTripByID), ctx, id)
 }
 
+// LockIdempotencyKey mocks base method.
+func (m *MocktripRepository) LockIdempotencyKey(ctx context.Context, id uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LockIdempotencyKey", ctx, id)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// LockIdempotencyKey indicates an expected call of LockIdempotencyKey.
+func (mr *MocktripRepositoryMockRecorder) LockIdempotencyKey(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LockIdempotencyKey", reflect.TypeOf((*MocktripRepository)(nil).LockIdempotencyKey), ctx, id)
+}
+
 // MocktxManager is a mock of txManager interface.
 type MocktxManager struct {
 	ctrl     *gomock.Controller
@@ -150,4 +164,40 @@ func (m *MocktxManager) Do(ctx context.Context, fn func(context.Context) error) 
 func (mr *MocktxManagerMockRecorder) Do(ctx, fn any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Do", reflect.TypeOf((*MocktxManager)(nil).Do), ctx, fn)
+}
+
+// Mockmetrics is a mock of metrics interface.
+type Mockmetrics struct {
+	ctrl     *gomock.Controller
+	recorder *MockmetricsMockRecorder
+	isgomock struct{}
+}
+
+// MockmetricsMockRecorder is the mock recorder for Mockmetrics.
+type MockmetricsMockRecorder struct {
+	mock *Mockmetrics
+}
+
+// NewMockmetrics creates a new mock instance.
+func NewMockmetrics(ctrl *gomock.Controller) *Mockmetrics {
+	mock := &Mockmetrics{ctrl: ctrl}
+	mock.recorder = &MockmetricsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *Mockmetrics) EXPECT() *MockmetricsMockRecorder {
+	return m.recorder
+}
+
+// IncTripsCreated mocks base method.
+func (m *Mockmetrics) IncTripsCreated(ctx context.Context) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "IncTripsCreated", ctx)
+}
+
+// IncTripsCreated indicates an expected call of IncTripsCreated.
+func (mr *MockmetricsMockRecorder) IncTripsCreated(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncTripsCreated", reflect.TypeOf((*Mockmetrics)(nil).IncTripsCreated), ctx)
 }

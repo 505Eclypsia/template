@@ -32,39 +32,38 @@ type Container struct {
 }
 
 func New(ctx context.Context, cfg *config.Config) (*Container, error) {
-	// 1. Telemetry & slog
 	logger, teleShutdown, err := telemetry.Setup(ctx, cfg)
-	_ = telemetry.InitBusinessMetrics()
 	if err != nil {
 		return nil, fmt.Errorf("telemetry setup: %w", err)
 	}
+	if err := telemetry.InitBusinessMetrics(); err != nil {
+		return nil, fmt.Errorf("business metrics setup: %w", err)
+	}
 
-	// 2. Postgres
 	pool, err := postgres.NewPool(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres setup: %w", err)
 	}
 
-	// 3. Infra & Repos
 	txManager := transaction.NewTxManager(pool)
-	repo := tripRepo.NewTripRepo(pool)
+	repo := tripRepo.NewTripRepo(pool, cfg.DatabaseQueryTimeout)
 
-	// 4. Usecases
-	createUC := tripCreateUC.New(repo, txManager)
+	createUC := tripCreateUC.New(repo, txManager, telemetry.Metrics)
 	getUC := tripGetUC.New(repo)
-	finishUC := tripFinishUC.New(repo, txManager)
+	finishUC := tripFinishUC.New(repo, txManager, telemetry.Metrics)
 
-	// 5. HTTP Handlers
-	createH := tripCreateHTTP.New(createUC)
-	getH := tripGetHTTP.New(getUC)
-	finishH := tripFinishHTTP.New(finishUC)
+	createH := tripCreateHTTP.New(createUC, logger)
+	getH := tripGetHTTP.New(getUC, logger)
+	finishH := tripFinishHTTP.New(finishUC, logger)
 
-	serverImpl := appHTTP.NewServer(createH, getH, finishH, pool)
+	serverImpl := appHTTP.NewServer(createH, getH, finishH, pool, cfg.DatabaseConnectTimeout)
 
-	// 6. Router & Middleware
 	r := chi.NewRouter()
 	appMiddleware.Chain(r, logger)
-	api.HandlerFromMux(serverImpl, r)
+	api.HandlerWithOptions(serverImpl, api.ChiServerOptions{
+		BaseRouter:       r,
+		ErrorHandlerFunc: serverImpl.HandleAPIError,
+	})
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

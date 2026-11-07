@@ -21,8 +21,9 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 	poolConfig.MaxConns = cfg.DatabaseMaxConns
 	poolConfig.MinConns = cfg.DatabaseMinConns
 	poolConfig.MaxConnLifetime = cfg.DatabaseMaxConnLifetime
+	poolConfig.ConnConfig.ConnectTimeout = cfg.DatabaseConnectTimeout
 
-	connCtx, cancel := context.WithTimeout(ctx, cfg.DatabaseConnTimeout)
+	connCtx, cancel := context.WithTimeout(ctx, cfg.DatabaseConnectTimeout)
 	defer cancel()
 
 	pool, err := pgxpool.NewWithConfig(connCtx, poolConfig)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -36,11 +37,12 @@ func Setup(ctx context.Context, cfg *config.Config) (*slog.Logger, ShutdownFunc,
 		endpoint = "localhost:22318"
 	}
 
-	otlptracehttp.WithEndpoint(endpoint)
-	otlpmetrichttp.WithEndpoint(endpoint)
+	endpoint = strings.TrimPrefix(endpoint, "http://")
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimRight(endpoint, "/")
 
 	traceExporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint("localhost:22318"),
+		otlptracehttp.WithEndpoint(endpoint),
 		otlptracehttp.WithInsecure(),
 	)
 	if err != nil {
@@ -55,7 +57,7 @@ func Setup(ctx context.Context, cfg *config.Config) (*slog.Logger, ShutdownFunc,
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
 	metricExporter, err := otlpmetrichttp.New(ctx,
-		otlpmetrichttp.WithEndpoint("localhost:22318"),
+		otlpmetrichttp.WithEndpoint(endpoint),
 		otlpmetrichttp.WithInsecure(),
 	)
 	if err != nil {
@@ -68,9 +70,16 @@ func Setup(ctx context.Context, cfg *config.Config) (*slog.Logger, ShutdownFunc,
 	)
 	otel.SetMeterProvider(mp)
 
-	logLevel := slog.LevelInfo
-	if cfg.LogLevel == "debug" {
+	var logLevel slog.Level
+	switch strings.ToLower(cfg.LogLevel) {
+	case "debug":
 		logLevel = slog.LevelDebug
+	case "warn", "warning":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
 	}
 
 	handler := &traceLogHandler{
@@ -78,9 +87,9 @@ func Setup(ctx context.Context, cfg *config.Config) (*slog.Logger, ShutdownFunc,
 	}
 	logger := slog.New(handler)
 
-	shutdown := func(ctx context.Context) error {
-		_ = tp.Shutdown(ctx)
-		_ = mp.Shutdown(ctx)
+	shutdown := func(sCtx context.Context) error {
+		_ = tp.Shutdown(sCtx)
+		_ = mp.Shutdown(sCtx)
 		return nil
 	}
 

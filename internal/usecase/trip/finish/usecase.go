@@ -7,57 +7,60 @@ import (
 	"github.com/google/uuid"
 
 	domain "github.com/505Eclypsia/template/internal/domain/trip"
-	"github.com/505Eclypsia/template/internal/infra/telemetry"
 	"github.com/505Eclypsia/template/internal/model"
 )
 
 type UseCase struct {
 	repo      tripRepository
 	txManager txManager
+	metrics   metrics
 }
 
-func New(repo tripRepository, txManager txManager) *UseCase {
-	return &UseCase{repo: repo, txManager: txManager}
+func New(repo tripRepository, txManager txManager, metrics metrics) *UseCase {
+	return &UseCase{repo: repo, txManager: txManager, metrics: metrics}
 }
 
 func (uc *UseCase) Finish(ctx context.Context, id uuid.UUID, changedAt time.Time) (*model.Trip, error) {
-	trip, err := uc.repo.GetTripByID(ctx, id)
+	tripModel, err := uc.repo.GetTripByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if trip.Status != domain.StatusActive {
-		return nil, domain.ErrTripCompleted
+
+	domainTrip := domain.Trip{
+		ID:         tripModel.ID,
+		Status:     tripModel.Status,
+		FinishedAt: tripModel.FinishedAt,
 	}
 
-	err = uc.txManager.Do(ctx, func(ctx context.Context) error {
-		err := uc.repo.Finish(ctx, id)
-		if err != nil {
+	if err := domainTrip.Finish(changedAt); err != nil {
+		return nil, err
+	}
+
+	fromStatus := tripModel.Status
+
+	err = uc.txManager.Do(ctx, func(txCtx context.Context) error {
+		if err := uc.repo.Finish(txCtx, id, changedAt); err != nil {
 			return err
 		}
 
 		reason := "trip finished"
 		tripStatusHistory := model.TripStatusHistory{
 			TripID:     id,
-			FromStatus: &trip.Status,
-			ToStatus:   domain.StatusCompleted,
+			FromStatus: &fromStatus,
+			ToStatus:   "completed",
 			Reason:     &reason,
 			ChangedAt:  changedAt,
 		}
 
-		err = uc.repo.AddTripStatusHistory(ctx, tripStatusHistory)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return uc.repo.AddTripStatusHistory(txCtx, tripStatusHistory)
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	trip.Status = domain.StatusCompleted
-	trip.FinishedAt = &changedAt
+	tripModel.Status = domainTrip.Status
+	tripModel.FinishedAt = domainTrip.FinishedAt
 
-	telemetry.Metrics.IncTripsCompleted(ctx)
-	return trip, nil
+	uc.metrics.IncTripsCompleted(ctx)
+	return tripModel, nil
 }

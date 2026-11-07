@@ -16,9 +16,14 @@ type (
 		GetIdempotencyKeyByID(ctx context.Context, id uuid.UUID) (*model.TripIdempotencyKey, error)
 		AddTripIdempotencyKey(ctx context.Context, tIK model.TripIdempotencyKey) error
 		GetTripByID(ctx context.Context, id uuid.UUID) (*model.Trip, error)
+		LockIdempotencyKey(ctx context.Context, id uuid.UUID) error
 	}
 
 	txManager interface {
 		Do(ctx context.Context, fn func(ctx context.Context) error) error
+	}
+
+	metrics interface {
+		IncTripsCreated(ctx context.Context)
 	}
 )

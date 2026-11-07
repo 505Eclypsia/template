@@ -16,7 +16,7 @@ type Config struct {
 	DatabaseMaxConns        int32
 	DatabaseMinConns        int32
 	DatabaseMaxConnLifetime time.Duration
-	DatabaseConnTimeout     time.Duration
+	DatabaseConnectTimeout  time.Duration
 	DatabaseQueryTimeout    time.Duration
 }
 
@@ -35,7 +35,7 @@ func Load() (*Config, error) {
 		DatabaseMaxConns:        r.int32("DATABASE_MAX_CONNS"),
 		DatabaseMinConns:        r.int32("DATABASE_MIN_CONNS"),
 		DatabaseMaxConnLifetime: r.time("DATABASE_MAX_CONN_LIFETIME"),
-		DatabaseConnTimeout:     r.time("DATABASE_CONNECT_TIMEOUT"),
+		DatabaseConnectTimeout:  r.time("DATABASE_CONNECT_TIMEOUT"),
 		DatabaseQueryTimeout:    r.time("DATABASE_QUERY_TIMEOUT"),
 	}
 

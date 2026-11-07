@@ -10,53 +10,60 @@ import (
 	"github.com/google/uuid"
 
 	domain "github.com/505Eclypsia/template/internal/domain/trip"
-	"github.com/505Eclypsia/template/internal/infra/telemetry"
 	"github.com/505Eclypsia/template/internal/model"
 )
 
 type UseCase struct {
 	repo      tripRepository
 	txManager txManager
+	metrics   metrics
 }
 
-func New(repo tripRepository, txManager txManager) *UseCase {
-	return &UseCase{repo: repo, txManager: txManager}
+func New(repo tripRepository, txManager txManager, metrics metrics) *UseCase {
+	return &UseCase{repo: repo, txManager: txManager, metrics: metrics}
 }
 
 func (uc *UseCase) Create(ctx context.Context, trip *model.Trip, idempotencyKeyID *uuid.UUID) (*model.Trip, bool, error) {
-	var tripHash string
-
-	if idempotencyKeyID != nil {
-		tIK, err := uc.repo.GetIdempotencyKeyByID(ctx, *idempotencyKeyID)
-		if err != nil {
-			return nil, false, err
-		}
-
-		tripHash = computeHash(*trip)
-
-		if tIK != nil {
-			if tripHash != tIK.RequestHash {
-				return nil, false, domain.ErrIdempotencyConflict
-			}
-
-			existingTrip, err := uc.repo.GetTripByID(ctx, tIK.TripID)
-			if err != nil {
-				return nil, false, err
-			}
-			return existingTrip, false, nil
-		}
-	}
-
 	if err := validate(trip); err != nil {
 		return nil, false, err
 	}
 
-	tripID := uuid.New()
-	trip.ID = tripID
+	var tripHash string
+	if idempotencyKeyID != nil {
+		tripHash = computeHash(*trip)
+	}
+
+	trip.ID = uuid.New()
 	trip.StartedAt = time.Now()
 	trip.Status = domain.StatusActive
 
+	var existingTrip *model.Trip
+
 	err := uc.txManager.Do(ctx, func(txCtx context.Context) error {
+		if idempotencyKeyID != nil {
+			if err := uc.repo.LockIdempotencyKey(txCtx, *idempotencyKeyID); err != nil {
+				return err
+			}
+
+			tIK, err := uc.repo.GetIdempotencyKeyByID(txCtx, *idempotencyKeyID)
+			if err != nil {
+				return err
+			}
+
+			if tIK != nil {
+				if tIK.RequestHash != tripHash {
+					return domain.ErrIdempotencyConflict
+				}
+
+				found, err := uc.repo.GetTripByID(txCtx, tIK.TripID)
+				if err != nil {
+					return err
+				}
+				existingTrip = found
+				return nil
+			}
+		}
+
 		if err := uc.repo.Create(txCtx, *trip); err != nil {
 			return err
 		}
@@ -73,12 +80,11 @@ func (uc *UseCase) Create(ctx context.Context, trip *model.Trip, idempotencyKeyI
 		}
 
 		if idempotencyKeyID != nil {
-			tIK := model.TripIdempotencyKey{
+			return uc.repo.AddTripIdempotencyKey(txCtx, model.TripIdempotencyKey{
 				ID:          *idempotencyKeyID,
 				RequestHash: tripHash,
 				TripID:      trip.ID,
-			}
-			return uc.repo.AddTripIdempotencyKey(txCtx, tIK)
+			})
 		}
 		return nil
 	})
@@ -86,13 +92,23 @@ func (uc *UseCase) Create(ctx context.Context, trip *model.Trip, idempotencyKeyI
 		return nil, false, err
 	}
 
-	telemetry.Metrics.IncTripsCreated(ctx)
+	if existingTrip != nil {
+		return existingTrip, false, nil
+	}
+
+	uc.metrics.IncTripsCreated(ctx)
 	return trip, true, nil
 }
 
 const errCoordsOutOfRange = "coordinates out of range"
 
 func validate(trip *model.Trip) error {
+	if trip.UserID == uuid.Nil {
+		return &domain.ValidationError{Field: "UserID", Message: "user id must not be empty"}
+	}
+	if trip.DriverID == uuid.Nil {
+		return &domain.ValidationError{Field: "DriverID", Message: "driver id must not be empty"}
+	}
 	if trip.Price < 0 {
 		return &domain.ValidationError{Field: "Price", Message: "price cannot be negative"}
 	}

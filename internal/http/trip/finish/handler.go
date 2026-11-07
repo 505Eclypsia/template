@@ -2,6 +2,7 @@ package finish
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -11,10 +12,11 @@ import (
 
 type Handler struct {
 	useCase useCase
+	logger  *slog.Logger
 }
 
-func New(useCase useCase) *Handler {
-	return &Handler{useCase: useCase}
+func New(useCase useCase, logger *slog.Logger) *Handler {
+	return &Handler{useCase: useCase, logger: logger}
 }
 
 func (h *Handler) Finish(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
@@ -23,7 +25,7 @@ func (h *Handler) Finish(w http.ResponseWriter, r *http.Request, tripId api.Trip
 
 	tripModel, err := h.useCase.Finish(r.Context(), id, now)
 	if err != nil {
-		dE.WriteProblem(w, r, err)
+		dE.WriteAndLog(w, r, h.logger, "finish trip", err)
 		return
 	}
 

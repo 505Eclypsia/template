@@ -3,6 +3,7 @@ package finish
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -11,12 +12,16 @@ import (
 
 type (
 	tripRepository interface {
-		Finish(ctx context.Context, id uuid.UUID) error
+		Finish(ctx context.Context, id uuid.UUID, finishedAt time.Time) error
 		AddTripStatusHistory(ctx context.Context, tSH model.TripStatusHistory) error
 		GetTripByID(ctx context.Context, id uuid.UUID) (*model.Trip, error)
 	}
 
 	txManager interface {
 		Do(ctx context.Context, fn func(ctx context.Context) error) error
+	}
+
+	metrics interface {
+		IncTripsCompleted(ctx context.Context)
 	}
 )

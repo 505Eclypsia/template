@@ -2,6 +2,7 @@ package get
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/505Eclypsia/template/internal/generated/api"
@@ -10,10 +11,11 @@ import (
 
 type Handler struct {
 	useCase useCase
+	logger  *slog.Logger
 }
 
-func New(useCase useCase) *Handler {
-	return &Handler{useCase: useCase}
+func New(useCase useCase, logger *slog.Logger) *Handler {
+	return &Handler{useCase: useCase, logger: logger}
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
@@ -21,7 +23,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request, tripId api.TripId)
 
 	tripModel, err := h.useCase.Get(r.Context(), id)
 	if err != nil {
-		dE.WriteProblem(w, r, err)
+		dE.WriteAndLog(w, r, h.logger, "get trip", err)
 		return
 	}
 

@@ -12,6 +12,7 @@ package finish_test
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	model "github.com/505Eclypsia/template/internal/model"
 	uuid "github.com/google/uuid"
@@ -57,17 +58,17 @@ func (mr *MocktripRepositoryMockRecorder) AddTripStatusHistory(ctx, tSH any) *go
 }
 
 // Finish mocks base method.
-func (m *MocktripRepository) Finish(ctx context.Context, id uuid.UUID) error {
+func (m *MocktripRepository) Finish(ctx context.Context, id uuid.UUID, finishedAt time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Finish", ctx, id)
+	ret := m.ctrl.Call(m, "Finish", ctx, id, finishedAt)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Finish indicates an expected call of Finish.
-func (mr *MocktripRepositoryMockRecorder) Finish(ctx, id any) *gomock.Call {
+func (mr *MocktripRepositoryMockRecorder) Finish(ctx, id, finishedAt any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Finish", reflect.TypeOf((*MocktripRepository)(nil).Finish), ctx, id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Finish", reflect.TypeOf((*MocktripRepository)(nil).Finish), ctx, id, finishedAt)
 }
 
 // GetTripByID mocks base method.
@@ -121,4 +122,40 @@ func (m *MocktxManager) Do(ctx context.Context, fn func(context.Context) error) 
 func (mr *MocktxManagerMockRecorder) Do(ctx, fn any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Do", reflect.TypeOf((*MocktxManager)(nil).Do), ctx, fn)
+}
+
+// Mockmetrics is a mock of metrics interface.
+type Mockmetrics struct {
+	ctrl     *gomock.Controller
+	recorder *MockmetricsMockRecorder
+	isgomock struct{}
+}
+
+// MockmetricsMockRecorder is the mock recorder for Mockmetrics.
+type MockmetricsMockRecorder struct {
+	mock *Mockmetrics
+}
+
+// NewMockmetrics creates a new mock instance.
+func NewMockmetrics(ctrl *gomock.Controller) *Mockmetrics {
+	mock := &Mockmetrics{ctrl: ctrl}
+	mock.recorder = &MockmetricsMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *Mockmetrics) EXPECT() *MockmetricsMockRecorder {
+	return m.recorder
+}
+
+// IncTripsCompleted mocks base method.
+func (m *Mockmetrics) IncTripsCompleted(ctx context.Context) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "IncTripsCompleted", ctx)
+}
+
+// IncTripsCompleted indicates an expected call of IncTripsCompleted.
+func (mr *MockmetricsMockRecorder) IncTripsCompleted(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IncTripsCompleted", reflect.TypeOf((*Mockmetrics)(nil).IncTripsCompleted), ctx)
 }
