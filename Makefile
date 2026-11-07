@@ -16,4 +16,14 @@ migrate-status:
 	goose -dir ./migrations postgres "$$DATABASE_URL" status
 
 run:
-	go run ./cmd/trip-service $(ARGS)
+	go run ./cmd/service $(ARGS)
+
+test:
+	go test -race -coverprofile=coverage.out -coverpkg=./internal/domain/...,./internal/usecase/... ./internal/domain/... ./internal/usecase/...
+	go tool cover -func=coverage.out
+
+test-integration:
+	go test -tags=integration -v ./internal/repository/...
+
+lint:
+	golangci-lint run ./...

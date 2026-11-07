@@ -1,9 +1,11 @@
-package models
+package model
 
 import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/505Eclypsia/template/internal/domain/trip"
 )
 
 type Trip struct {
@@ -17,7 +19,7 @@ type Trip struct {
 	EndLongitude   float64
 
 	Price  int64
-	Status string
+	Status trip.Status
 
 	StartedAt  time.Time
 	FinishedAt *time.Time
@@ -26,8 +28,8 @@ type Trip struct {
 type TripStatusHistory struct {
 	ID         int64
 	TripID     uuid.UUID
-	FromStatus *string
-	ToStatus   string
+	FromStatus *trip.Status
+	ToStatus   trip.Status
 	Reason     *string
 	ChangedAt  time.Time
 }
