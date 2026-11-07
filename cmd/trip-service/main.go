@@ -26,7 +26,7 @@ func main() {
 	}
 	log.Printf("config loaded successfully (HTTP_ADDR=%s)", cfg.HTTPAddr)
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.DatabaseConnTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.DatabaseConnectTimeout)
 	defer cancel()
 
 	pool, err := db.NewPool(ctx, cfg)
@@ -36,7 +36,7 @@ func main() {
 	defer pool.Close()
 	log.Println("database pool connected and pinged successfully")
 
-	repo := db.NewTripRepo(pool)
+	repo := db.NewTripRepo(pool, cfg.DatabaseQueryTimeout)
 	txManager := db.NewTxManager(pool)
 	h := handler.New(repo, txManager, pool)
 
@@ -46,7 +46,10 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	api.HandlerFromMux(h, r)
+	api.HandlerWithOptions(h, api.ChiServerOptions{
+		BaseRouter:       r,
+		ErrorHandlerFunc: h.HandleAPIError,
+	})
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -58,7 +61,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("🚀 Server is running on %s", cfg.HTTPAddr)
+		log.Printf("Server is running on %s", cfg.HTTPAddr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server listen error: %v", err)
 		}
@@ -78,5 +81,4 @@ func main() {
 	}
 
 	log.Println("server exited properly, all connections closed")
-
 }

@@ -18,11 +18,23 @@ import (
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 type TripRepo struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	queryTimeout time.Duration
 }
 
-func NewTripRepo(pool *pgxpool.Pool) *TripRepo {
-	return &TripRepo{pool: pool}
+func NewTripRepo(pool *pgxpool.Pool, queryTimeout time.Duration) *TripRepo {
+	return &TripRepo{
+		pool:         pool,
+		queryTimeout: queryTimeout,
+	}
+}
+
+func (t *TripRepo) LockIdempotencyKey(ctx context.Context, id uuid.UUID) error {
+	_, err := t.exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", id.String())
+	if err != nil {
+		return fmt.Errorf("lock idempotency key: %w", err)
+	}
+	return nil
 }
 
 func (t *TripRepo) Create(ctx context.Context, trip models.Trip) error {
@@ -61,19 +73,18 @@ func (t *TripRepo) Finish(ctx context.Context, id uuid.UUID) error {
 		ToSql()
 
 	if err != nil {
-		return fmt.Errorf("query making: %v", err)
+		return fmt.Errorf("query making: %w", err)
 	}
 
 	tag, err := t.exec(ctx, query, args...)
-
 	if err != nil {
-		return fmt.Errorf("database update: %v", err)
+		return fmt.Errorf("database update: %w", err)
 	}
 
 	if tag.RowsAffected() == 0 {
 		query, args, err = psql.Select("status").From("trips").Where(sq.Eq{"id": id}).ToSql()
 		if err != nil {
-			return fmt.Errorf("query making: %v", err)
+			return fmt.Errorf("query making: %w", err)
 		}
 
 		var status string
@@ -102,42 +113,43 @@ func (t *TripRepo) AddTripStatusHistory(ctx context.Context, tSH models.TripStat
 		ToSql()
 
 	if err != nil {
-		return fmt.Errorf("making query: %v", err)
+		return fmt.Errorf("making query: %w", err)
 	}
 	_, err = t.exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("database insert: %v", err)
+		return fmt.Errorf("database insert: %w", err)
 	}
 	return nil
 }
 
 func (t *TripRepo) AddTripIdempotencyKey(ctx context.Context, tIK models.TripIdempotencyKey) error {
 	query, args, err := psql.Insert("trip_idempotency_keys").
-		Columns("id", "request_hash", "trip_id").
-		Values(tIK.ID, tIK.RequestHash, tIK.TripID).
+		Columns("id", "request_hash", "trip_id", "created_at").
+		Values(tIK.ID, tIK.RequestHash, tIK.TripID, time.Now()).
+		Suffix("ON CONFLICT (id) DO UPDATE SET request_hash = EXCLUDED.request_hash, trip_id = EXCLUDED.trip_id, created_at = EXCLUDED.created_at").
 		ToSql()
 
 	if err != nil {
-		return fmt.Errorf("query making: %v", err)
+		return fmt.Errorf("making query: %w", err)
 	}
 
 	_, err = t.exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("database insert: %v", err)
+		return fmt.Errorf("database insert: %w", err)
 	}
 
 	return nil
 }
 
 func (t *TripRepo) GetIdempotencyKeyByID(ctx context.Context, id uuid.UUID) (*models.TripIdempotencyKey, error) {
-	query, args, err := psql.Select(
-		"id", "request_hash", "trip_id").
+	query, args, err := psql.Select("id", "request_hash", "trip_id").
 		From("trip_idempotency_keys").
 		Where(sq.Eq{"id": id}).
+		Where("created_at >= now() - interval '24 hours'").
 		ToSql()
 
 	if err != nil {
-		return nil, fmt.Errorf("query making: %v", err)
+		return nil, fmt.Errorf("query making: %w", err)
 	}
 
 	idempotencyKey := models.TripIdempotencyKey{}
@@ -147,6 +159,10 @@ func (t *TripRepo) GetIdempotencyKeyByID(ctx context.Context, id uuid.UUID) (*mo
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrIdempotencyKeyNotFound
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("database querying: %w", err)
 	}
 
 	return &idempotencyKey, nil
@@ -161,7 +177,7 @@ func (t *TripRepo) GetTripByID(ctx context.Context, id uuid.UUID) (*models.Trip,
 		From("trips").Where(sq.Eq{"id": id}).ToSql()
 
 	if err != nil {
-		return nil, fmt.Errorf("query making: %v", err)
+		return nil, fmt.Errorf("query making: %w", err)
 	}
 
 	trip := models.Trip{}
@@ -176,21 +192,27 @@ func (t *TripRepo) GetTripByID(ctx context.Context, id uuid.UUID) (*models.Trip,
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("database querying: %v", err)
+		return nil, fmt.Errorf("database querying: %w", err)
 	}
 	return &trip, nil
 }
 
 func (t *TripRepo) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, t.queryTimeout)
+	defer cancel()
+
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx.Exec(ctx, sql, args...)
+		return tx.Exec(queryCtx, sql, args...)
 	}
-	return t.pool.Exec(ctx, sql, args...)
+	return t.pool.Exec(queryCtx, sql, args...)
 }
 
 func (t *TripRepo) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	queryCtx, cancel := context.WithTimeout(ctx, t.queryTimeout)
+	defer cancel()
+
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx.QueryRow(ctx, sql, args...)
+		return tx.QueryRow(queryCtx, sql, args...)
 	}
-	return t.pool.QueryRow(ctx, sql, args...)
+	return t.pool.QueryRow(queryCtx, sql, args...)
 }

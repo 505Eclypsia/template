@@ -23,15 +23,19 @@ func NewTxManager(pool *pgxpool.Pool) TxManager {
 }
 
 func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	if _, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
+		return fn(ctx)
+	}
+
 	tx, err := m.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("pool start: %v", err)
+		return fmt.Errorf("pool start: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
 	txCtx := context.WithValue(ctx, txKey{}, tx)
 
-	err = fn(txCtx)
-	if err != nil {
+	if err := fn(txCtx); err != nil {
 		return err
 	}
 
@@ -40,4 +44,5 @@ func (m *txManager) Do(ctx context.Context, fn func(ctx context.Context) error) 
 	}
 
 	return nil
+
 }

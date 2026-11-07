@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-
 	"net/http"
 	"time"
 
@@ -18,6 +17,13 @@ import (
 	"github.com/505Eclypsia/template/internal/db"
 	"github.com/505Eclypsia/template/internal/models"
 )
+
+var ErrIdempotencyConflict = errors.New("idempotency conflict")
+
+func computeHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
 
 func writeProblem(w http.ResponseWriter, r *http.Request, status int, code, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
@@ -49,6 +55,26 @@ func New(repo *db.TripRepo, txManager db.TxManager, pool *pgxpool.Pool) *Handler
 	}
 }
 
+func (h *Handler) HandleAPIError(w http.ResponseWriter, r *http.Request, err error) {
+	writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", err.Error())
+}
+
+func validateCreateTripRequest(req *api.CreateTripJSONRequestBody) bool {
+	if req.UserId == uuid.Nil || req.DriverId == uuid.Nil {
+		return false
+	}
+	if req.Price < 0 {
+		return false
+	}
+	if req.StartPoint.Latitude < -90 || req.StartPoint.Latitude > 90 ||
+		req.StartPoint.Longitude < -180 || req.StartPoint.Longitude > 180 ||
+		req.EndPoint.Latitude < -90 || req.EndPoint.Latitude > 90 ||
+		req.EndPoint.Longitude < -180 || req.EndPoint.Longitude > 180 {
+		return false
+	}
+	return true
+}
+
 func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.CreateTripParams) {
 	rawBody, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -62,42 +88,23 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 		return
 	}
 
-	if req.Price < 0 ||
-		req.StartPoint.Latitude < -90 || req.StartPoint.Latitude > 90 ||
-		req.StartPoint.Longitude < -180 || req.StartPoint.Longitude > 180 ||
-		req.EndPoint.Latitude < -90 || req.EndPoint.Latitude > 90 ||
-		req.EndPoint.Longitude < -180 || req.EndPoint.Longitude > 180 {
+	if !validateCreateTripRequest(&req) {
 		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "Coordinates or price out of range")
 		return
 	}
 
-	var idempotencyKeyID uuid.UUID
-	var requestHash string
 	keyHeader := r.Header.Get("Idempotency-Key")
+	var idempotencyKeyID *uuid.UUID
 	if keyHeader != "" {
 		parsedKey, err := uuid.Parse(keyHeader)
 		if err != nil {
 			writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "Idempotency-Key must be a valid UUID")
 			return
 		}
-		idempotencyKeyID = parsedKey
-		idempotencyKeyModel, err := h.repo.GetIdempotencyKeyByID(r.Context(), idempotencyKeyID)
-		requestHash = computeHash(rawBody)
-		if err != nil {
-			if !errors.Is(err, db.ErrIdempotencyKeyNotFound) {
-				writeProblem(w, r, http.StatusInternalServerError, "internal_error", "Internal error", "Failed to get idempotency key")
-				return
-			}
-		} else {
-			if idempotencyKeyModel.RequestHash != requestHash {
-				writeProblem(w, r, 409, "idempotency_conflict", "Idempotency conflict", "Idempotency conflict")
-				return
-			}
-			h.GetTrip(w, r, idempotencyKeyModel.TripID)
-			return
-		}
+		idempotencyKeyID = &parsedKey
 	}
 
+	requestHash := computeHash(rawBody)
 	tripID := uuid.New()
 	now := time.Now()
 
@@ -121,8 +128,27 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 		ChangedAt:  now,
 	}
 
-	ctx := r.Context()
-	err = h.txManager.Do(ctx, func(txCtx context.Context) error {
+	var existingTripID *uuid.UUID
+
+	err = h.txManager.Do(r.Context(), func(txCtx context.Context) error {
+		if idempotencyKeyID != nil {
+			if err := h.repo.LockIdempotencyKey(txCtx, *idempotencyKeyID); err != nil {
+				return err
+			}
+
+			keyModel, err := h.repo.GetIdempotencyKeyByID(txCtx, *idempotencyKeyID)
+			if err == nil {
+				if keyModel.RequestHash != requestHash {
+					return ErrIdempotencyConflict
+				}
+				existingTripID = &keyModel.TripID
+				return nil
+			}
+			if !errors.Is(err, db.ErrIdempotencyKeyNotFound) {
+				return err
+			}
+		}
+
 		if err := h.repo.Create(txCtx, trip); err != nil {
 			return err
 		}
@@ -130,23 +156,31 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 			return err
 		}
 
-		if keyHeader != "" {
-			idempotencyKeyModel := models.TripIdempotencyKey{
-				ID:          idempotencyKeyID,
+		if idempotencyKeyID != nil {
+			return h.repo.AddTripIdempotencyKey(txCtx, models.TripIdempotencyKey{
+				ID:          *idempotencyKeyID,
 				RequestHash: requestHash,
 				TripID:      tripID,
-			}
-			return h.repo.AddTripIdempotencyKey(txCtx, idempotencyKeyModel)
+			})
 		}
 		return nil
 	})
 
 	if err != nil {
+		if errors.Is(err, ErrIdempotencyConflict) {
+			writeProblem(w, r, http.StatusConflict, "idempotency_conflict", "Idempotency conflict", "Idempotency-Key was already used with a different request body")
+			return
+		}
 		if errors.Is(err, db.ErrDriverBusy) {
 			writeProblem(w, r, http.StatusConflict, "driver_busy", "Driver busy", "Driver already has an active trip")
 			return
 		}
 		writeProblem(w, r, http.StatusInternalServerError, "internal_error", "Internal error", "Failed to create trip")
+		return
+	}
+
+	if existingTripID != nil {
+		h.GetTrip(w, r, *existingTripID)
 		return
 	}
 
@@ -165,22 +199,12 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 		StartedAt:  now,
 	}
 
-	json.NewEncoder(w).Encode(resp)
-}
-
-func computeHash(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
 	tripUUID := uuid.UUID(tripId)
-	if tripUUID == uuid.Nil {
-		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "tripId must be a valid non-empty UUID")
-		return
-	}
-
-	tripModel, err := h.repo.GetTripByID(r.Context(), uuid.UUID(tripId))
+	tripModel, err := h.repo.GetTripByID(r.Context(), tripUUID)
 	if err != nil {
 		if errors.Is(err, db.ErrTripNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "trip_not_found", "Trip not found", "There is no trip with such ID")
@@ -190,15 +214,12 @@ func (h *Handler) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.Tri
 		return
 	}
 
-	startPoint := api.Coordinates{Latitude: tripModel.StartLatitude, Longitude: tripModel.StartLongitude}
-	endPoint := api.Coordinates{Latitude: tripModel.EndLatitude, Longitude: tripModel.EndLongitude}
-
-	trip := api.Trip{
+	resp := api.Trip{
 		Id:         tripModel.ID,
 		UserId:     tripModel.UserID,
 		DriverId:   tripModel.DriverID,
-		StartPoint: startPoint,
-		EndPoint:   endPoint,
+		StartPoint: api.Coordinates{Latitude: tripModel.StartLatitude, Longitude: tripModel.StartLongitude},
+		EndPoint:   api.Coordinates{Latitude: tripModel.EndLatitude, Longitude: tripModel.EndLongitude},
 		Price:      tripModel.Price,
 		Status:     api.TripStatus(tripModel.Status),
 		StartedAt:  tripModel.StartedAt,
@@ -207,33 +228,25 @@ func (h *Handler) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.Tri
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(trip)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
 	tripUUID := uuid.UUID(tripId)
-	if tripUUID == uuid.Nil {
-		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "tripId must be a valid non-empty UUID")
-		return
-	}
-
-	fromStatus := "active"
-	reason := "trip completed"
 	now := time.Now()
+	fromStatus := "active"
+	reason := "trip finished"
 
 	tripSH := models.TripStatusHistory{
-		ID:         1,
-		TripID:     tripId,
+		TripID:     tripUUID,
 		FromStatus: &fromStatus,
 		ToStatus:   "completed",
 		Reason:     &reason,
 		ChangedAt:  now,
 	}
 
-	ctx := r.Context()
-	err := h.txManager.Do(ctx, func(txCtx context.Context) error {
-		err := h.repo.Finish(txCtx, tripId)
-		if err != nil {
+	err := h.txManager.Do(r.Context(), func(txCtx context.Context) error {
+		if err := h.repo.Finish(txCtx, tripUUID); err != nil {
 			return err
 		}
 		return h.repo.AddTripStatusHistory(txCtx, tripSH)
@@ -241,32 +254,29 @@ func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.
 
 	if err != nil {
 		if errors.Is(err, db.ErrTripAlreadyCompleted) {
-			writeProblem(w, r, 409, "trip_completed", "Trip already completed", "Trip with such ID is already completed")
+			writeProblem(w, r, http.StatusConflict, "trip_completed", "Trip already completed", "Trip with such ID is already completed")
 			return
 		}
 		if errors.Is(err, db.ErrTripNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "trip_not_found", "Trip not found", "There is no trip with such ID")
 			return
 		}
-		writeProblem(w, r, http.StatusInternalServerError, "internal_error", "Internal error", "Failed to get trip")
+		writeProblem(w, r, http.StatusInternalServerError, "internal_error", "Internal error", "Failed to finish trip")
 		return
 	}
 
-	trip, err := h.repo.GetTripByID(ctx, tripId)
+	trip, err := h.repo.GetTripByID(r.Context(), tripUUID)
 	if err != nil {
 		writeProblem(w, r, http.StatusInternalServerError, "internal_error", "Internal error", "Failed to get trip")
 		return
 	}
 
-	startPoint := api.Coordinates{Latitude: trip.StartLatitude, Longitude: trip.StartLongitude}
-	endPoint := api.Coordinates{Latitude: trip.EndLatitude, Longitude: trip.EndLongitude}
-
 	resp := api.Trip{
 		Id:         trip.ID,
 		UserId:     trip.UserID,
 		DriverId:   trip.DriverID,
-		StartPoint: startPoint,
-		EndPoint:   endPoint,
+		StartPoint: api.Coordinates{Latitude: trip.StartLatitude, Longitude: trip.StartLongitude},
+		EndPoint:   api.Coordinates{Latitude: trip.EndLatitude, Longitude: trip.EndLongitude},
 		Price:      trip.Price,
 		Status:     api.TripStatus("completed"),
 		StartedAt:  trip.StartedAt,
@@ -275,29 +285,33 @@ func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	resp := map[string]string{"status": "ok"}
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(api.HealthResponse{
+		Status: "ok",
+	})
 }
 
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
-	err := h.pool.Ping(r.Context())
-	w.Header().Set("Content-type", "application/json")
-	if err != nil {
+	w.Header().Set("Content-Type", "application/json")
+
+	pingCtx, cancel := context.WithTimeout(r.Context(), h.pool.Config().ConnConfig.ConnectTimeout)
+	defer cancel()
+
+	if err := h.pool.Ping(pingCtx); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(api.HealthResponse{
+		_ = json.NewEncoder(w).Encode(api.HealthResponse{
 			Status: "unavailable",
 		})
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(api.HealthResponse{
+	_ = json.NewEncoder(w).Encode(api.HealthResponse{
 		Status: "ok",
 	})
 }
