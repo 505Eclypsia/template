@@ -207,12 +207,21 @@ func (t *TripRepo) exec(ctx context.Context, sql string, args ...any) (pgconn.Co
 	return t.pool.Exec(queryCtx, sql, args...)
 }
 
+type cancelRow struct {
+	pgx.Row
+	cancel context.CancelFunc
+}
+
+func (r cancelRow) Scan(dest ...any) error {
+	defer r.cancel()
+	return r.Row.Scan(dest...)
+}
+
 func (t *TripRepo) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	queryCtx, cancel := context.WithTimeout(ctx, t.queryTimeout)
-	defer cancel()
 
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx.QueryRow(queryCtx, sql, args...)
+		return cancelRow{Row: tx.QueryRow(queryCtx, sql, args...), cancel: cancel}
 	}
-	return t.pool.QueryRow(queryCtx, sql, args...)
+	return cancelRow{Row: t.pool.QueryRow(queryCtx, sql, args...), cancel: cancel}
 }
