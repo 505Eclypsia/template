@@ -1,0 +1,6 @@
+.git
+.env
+.tripgo
+*.exe
+tests
+docs
