@@ -58,6 +58,16 @@ type cancelRow struct {
 	cancel context.CancelFunc
 }
 
+type cancelRows struct {
+	pgx.Rows
+	cancel context.CancelFunc
+}
+
+func (r cancelRows) Close() {
+	r.Rows.Close()
+	r.cancel()
+}
+
 func (r cancelRow) Scan(dest ...any) error {
 	defer r.cancel()
 	return r.Row.Scan(dest...)
@@ -70,4 +80,21 @@ func (t *TripRepo) queryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 		return cancelRow{Row: tx.QueryRow(queryCtx, sql, args...), cancel: cancel}
 	}
 	return cancelRow{Row: t.pool.QueryRow(queryCtx, sql, args...), cancel: cancel}
+}
+
+func (t *TripRepo) query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	queryCtx, cancel := t.withTimeout(ctx)
+
+	var rows pgx.Rows
+	var err error
+	if tx, ok := transaction.FromContext(ctx); ok {
+		rows, err = tx.Query(queryCtx, sql, args...)
+	} else {
+		rows, err = t.pool.Query(queryCtx, sql, args...)
+	}
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return cancelRows{Rows: rows, cancel: cancel}, nil
 }

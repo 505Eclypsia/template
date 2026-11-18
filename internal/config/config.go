@@ -18,6 +18,13 @@ type Config struct {
 	DatabaseMaxConnLifetime time.Duration
 	DatabaseConnectTimeout  time.Duration
 	DatabaseQueryTimeout    time.Duration
+
+	PositionCheckInterval time.Duration
+	PositionStaleAfter    time.Duration
+	PositionWorkers       int32
+	PositionQueueSize     int32
+	PushHTTPURL           string
+	PushRequestTimeout    time.Duration
 }
 
 type envReader struct {
@@ -37,6 +44,13 @@ func Load() (*Config, error) {
 		DatabaseMaxConnLifetime: r.time("DATABASE_MAX_CONN_LIFETIME"),
 		DatabaseConnectTimeout:  r.time("DATABASE_CONNECT_TIMEOUT"),
 		DatabaseQueryTimeout:    r.time("DATABASE_QUERY_TIMEOUT"),
+
+		PositionCheckInterval: r.timeDefault("POSITION_CHECK_INTERVAL", 30*time.Second),
+		PositionStaleAfter:    r.timeDefault("POSITION_STALE_AFTER", 60*time.Second),
+		PositionWorkers:       r.int32Default("POSITION_WORKERS", 4),
+		PositionQueueSize:     r.int32Default("POSITION_QUEUE_SIZE", 100),
+		PushHTTPURL:           r.string("PUSH_HTTP_URL"),
+		PushRequestTimeout:    r.timeDefault("PUSH_REQUEST_TIMEOUT", time.Second),
 	}
 
 	if len(r.errs) > 0 {
@@ -75,6 +89,20 @@ func (r *envReader) int32(target string) int32 {
 		return 0
 	}
 	return int32(num)
+}
+
+func (r *envReader) int32Default(target string, def int32) int32 {
+	if os.Getenv(target) == "" {
+		return def
+	}
+	return r.int32(target)
+}
+
+func (r *envReader) timeDefault(target string, def time.Duration) time.Duration {
+	if os.Getenv(target) == "" {
+		return def
+	}
+	return r.time(target)
 }
 
 func (r *envReader) time(target string) time.Duration {

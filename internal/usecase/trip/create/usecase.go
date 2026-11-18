@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -100,8 +101,6 @@ func (uc *UseCase) Create(ctx context.Context, trip *model.Trip, idempotencyKeyI
 	return trip, true, nil
 }
 
-const errCoordsOutOfRange = "coordinates out of range"
-
 func validate(trip *model.Trip) error {
 	if trip.UserID == uuid.Nil {
 		return &domain.ValidationError{Field: "UserID", Message: "user id must not be empty"}
@@ -113,17 +112,10 @@ func validate(trip *model.Trip) error {
 		return &domain.ValidationError{Field: "Price", Message: "price cannot be negative"}
 	}
 
-	switch {
-	case trip.StartLatitude < -90 || trip.StartLatitude > 90:
-		return &domain.ValidationError{Field: "StartLatitude", Message: errCoordsOutOfRange}
-	case trip.StartLongitude < -180 || trip.StartLongitude > 180:
-		return &domain.ValidationError{Field: "StartLongitude", Message: errCoordsOutOfRange}
-	case trip.EndLatitude < -90 || trip.EndLatitude > 90:
-		return &domain.ValidationError{Field: "EndLatitude", Message: errCoordsOutOfRange}
-	case trip.EndLongitude < -180 || trip.EndLongitude > 180:
-		return &domain.ValidationError{Field: "EndLongitude", Message: errCoordsOutOfRange}
-	}
-	return nil
+	return errors.Join(
+		domain.ValidateCoordinates("start_point", trip.StartLatitude, trip.StartLongitude),
+		domain.ValidateCoordinates("end_point", trip.EndLatitude, trip.EndLongitude),
+	)
 }
 
 func computeHash(t model.Trip) string {

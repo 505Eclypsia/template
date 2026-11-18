@@ -113,3 +113,51 @@ func (t *TripRepo) AddTripIdempotencyKey(ctx context.Context, tIK model.TripIdem
 
 	return nil
 }
+
+func (t *TripRepo) CreateTripPosition(ctx context.Context, tripPosition model.TripPosition) (*model.TripPosition, error) {
+	query, args, err := psql.Insert("trip_positions").
+		Columns("trip_id", "latitude", "longitude", "recorded_at", "created_at").
+		Values(tripPosition.TripID,
+			tripPosition.Latitude, tripPosition.Longitude,
+			tripPosition.RecordedAt, sq.Expr("now()")).
+		Suffix("RETURNING id, trip_id, latitude, longitude, recorded_at").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("query making: %w", err)
+	}
+
+	var created model.TripPosition
+	err = t.queryRow(ctx, query, args...).Scan(
+		&created.ID,
+		&created.TripID,
+		&created.Latitude,
+		&created.Longitude,
+		&created.RecordedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("database insert: %w", err)
+	}
+
+	return &created, nil
+}
+
+func (t *TripRepo) UpdateLastPositionAt(ctx context.Context, tripId uuid.UUID, lastPositionAt time.Time) error {
+	query, args, err := psql.Update("trips").
+		Set("last_position_at", lastPositionAt).
+		Where(sq.Eq{"id": tripId}).
+		Where(sq.Or{
+			sq.Eq{"last_position_at": nil},
+			sq.Lt{"last_position_at": lastPositionAt},
+		}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("query making: %w", err)
+	}
+
+	_, err = t.exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("database update: %w", err)
+	}
+
+	return nil
+}
