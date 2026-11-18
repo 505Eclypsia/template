@@ -7,14 +7,15 @@ import (
 
 func convertModelToJSON(tripModel *model.Trip) api.Trip {
 	return api.Trip{
-		Id:         tripModel.ID,
-		UserId:     tripModel.UserID,
-		DriverId:   tripModel.DriverID,
-		StartPoint: api.Coordinates{Latitude: tripModel.StartLatitude, Longitude: tripModel.StartLongitude},
-		EndPoint:   api.Coordinates{Latitude: tripModel.EndLatitude, Longitude: tripModel.EndLongitude},
-		Price:      tripModel.Price,
-		Status:     api.TripStatus(tripModel.Status),
-		StartedAt:  tripModel.StartedAt,
-		FinishedAt: tripModel.FinishedAt,
+		Id:             tripModel.ID,
+		UserId:         tripModel.UserID,
+		DriverId:       tripModel.DriverID,
+		StartPoint:     api.Coordinates{Latitude: tripModel.StartLatitude, Longitude: tripModel.StartLongitude},
+		EndPoint:       api.Coordinates{Latitude: tripModel.EndLatitude, Longitude: tripModel.EndLongitude},
+		Price:          tripModel.Price,
+		Status:         api.TripStatus(tripModel.Status),
+		StartedAt:      tripModel.StartedAt,
+		FinishedAt:     tripModel.FinishedAt,
+		LastPositionAt: tripModel.LastPositionAt,
 	}
 }

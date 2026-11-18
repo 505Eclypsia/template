@@ -23,14 +23,15 @@ func convertModelToJson(tripModel *model.Trip) api.Trip {
 	endPoint := api.Coordinates{Latitude: tripModel.EndLatitude, Longitude: tripModel.EndLongitude}
 
 	tripJSON := api.Trip{
-		Id:         tripModel.ID,
-		UserId:     tripModel.UserID,
-		DriverId:   tripModel.DriverID,
-		StartPoint: startPoint,
-		EndPoint:   endPoint,
-		Price:      tripModel.Price,
-		Status:     api.TripStatus(tripModel.Status),
-		StartedAt:  tripModel.StartedAt,
+		Id:             tripModel.ID,
+		UserId:         tripModel.UserID,
+		DriverId:       tripModel.DriverID,
+		StartPoint:     startPoint,
+		EndPoint:       endPoint,
+		Price:          tripModel.Price,
+		Status:         api.TripStatus(tripModel.Status),
+		StartedAt:      tripModel.StartedAt,
+		LastPositionAt: tripModel.LastPositionAt,
 	}
 	return tripJSON
 }

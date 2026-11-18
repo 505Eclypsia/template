@@ -12,6 +12,8 @@ import (
 	tripCreate "github.com/505Eclypsia/template/internal/http/trip/create"
 	tripFinish "github.com/505Eclypsia/template/internal/http/trip/finish"
 	tripGet "github.com/505Eclypsia/template/internal/http/trip/get"
+	tripPosCreate "github.com/505Eclypsia/template/internal/http/tripposition/create"
+	tripPosGet "github.com/505Eclypsia/template/internal/http/tripposition/get"
 )
 
 type pinger interface {
@@ -19,26 +21,32 @@ type pinger interface {
 }
 
 type Server struct {
-	createHandler *tripCreate.Handler
-	getHandler    *tripGet.Handler
-	finishHandler *tripFinish.Handler
-	db            pinger
-	readyTimeout  time.Duration
+	createHandler    *tripCreate.Handler
+	getHandler       *tripGet.Handler
+	finishHandler    *tripFinish.Handler
+	createPosHandler *tripPosCreate.Handler
+	listPosHandler   *tripPosGet.Handler
+	db               pinger
+	readyTimeout     time.Duration
 }
 
 func NewServer(
 	createH *tripCreate.Handler,
 	getH *tripGet.Handler,
 	finishH *tripFinish.Handler,
+	createPosH *tripPosCreate.Handler,
+	listPosH *tripPosGet.Handler,
 	db pinger,
 	readyTimeout time.Duration,
 ) *Server {
 	return &Server{
-		createHandler: createH,
-		getHandler:    getH,
-		finishHandler: finishH,
-		db:            db,
-		readyTimeout:  readyTimeout,
+		createHandler:    createH,
+		getHandler:       getH,
+		finishHandler:    finishH,
+		createPosHandler: createPosH,
+		listPosHandler:   listPosH,
+		db:               db,
+		readyTimeout:     readyTimeout,
 	}
 }
 
@@ -85,10 +93,10 @@ func (s *Server) Ready(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(api.HealthResponse{Status: "ok"})
 }
 
-func (s *Server) CreateTripPosition(w http.ResponseWriter, _ *http.Request, _ api.TripId) {
-	w.WriteHeader(http.StatusNotImplemented)
+func (s *Server) CreateTripPosition(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	s.createPosHandler.CreateTripPosition(w, r, tripId)
 }
 
-func (s *Server) ListTripPositions(w http.ResponseWriter, _ *http.Request, _ api.TripId) {
-	w.WriteHeader(http.StatusNotImplemented)
+func (s *Server) ListTripPositions(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	s.listPosHandler.ListTripPositions(w, r, tripId)
 }

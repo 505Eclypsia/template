@@ -21,8 +21,9 @@ type Trip struct {
 	Price  int64
 	Status trip.Status
 
-	StartedAt  time.Time
-	FinishedAt *time.Time
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	LastPositionAt *time.Time
 }
 
 type TripStatusHistory struct {
@@ -38,4 +39,18 @@ type TripIdempotencyKey struct {
 	ID          uuid.UUID
 	RequestHash string
 	TripID      uuid.UUID
+}
+
+type TripPosition struct {
+	ID         int64
+	TripID     uuid.UUID
+	Latitude   float64
+	Longitude  float64
+	RecordedAt time.Time
+}
+
+type StaleTrip struct {
+	TripID         uuid.UUID
+	DriverID       uuid.UUID
+	LastActivityAt time.Time
 }
